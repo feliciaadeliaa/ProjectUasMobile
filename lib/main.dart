@@ -19,7 +19,7 @@ void main() async {
   );
 
   // Inisialisasi PocketBase
-  final pb = PocketBase('http://127.0.0.1:8090', authStore: store);
+  final pb = PocketBase('http://localhost:8090', authStore: store);
 
   // Tentukan rute awal berdasarkan status autentikasi
   final initialRoute = pb.authStore.isValid ? '/' : '/login';
@@ -154,10 +154,10 @@ class TaskFlowApp extends StatelessWidget {
           routes: {
             '/login': (context) => LoginScreen(pb: pb),
             '/register': (context) => RegisterScreen(pb: pb),
-            '/': (context) => const HomeScreen(),
-            '/add_task': (context) => const AddTaskScreen(),
+            '/': (context) => HomeScreen(pb: pb),
+            '/add_task': (context) => AddTaskScreen(pb: pb),
             '/profile': (context) => ProfileScreen(pb: pb),
-            '/kanban': (context) => KanbanScreen(pb: pb), // Pass pb to KanbanScreen
+            '/kanban': (context) => KanbanScreen(pb: pb),
           },
         );
       },
