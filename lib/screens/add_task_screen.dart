@@ -119,7 +119,7 @@ class _AddTaskScreenState extends State<AddTaskScreen> with TickerProviderStateM
     if (index == 0) {
       Navigator.pushReplacementNamed(context, '/');
     } else if (index == 2) {
-      Navigator.pushReplacementNamed(context, '/kanban');
+      Navigator.pushReplacementNamed(context, '/projects'); // Updated from '/kanban' to '/projects'
     } else if (index == 3) {
       Navigator.pushReplacementNamed(context, '/profile');
     }
@@ -726,7 +726,7 @@ class _AddTaskScreenState extends State<AddTaskScreen> with TickerProviderStateM
         items: const [
           BottomNavigationBarItem(icon: Icon(Icons.home), label: 'Home'),
           BottomNavigationBarItem(icon: Icon(Icons.add), label: 'Add Task'),
-          BottomNavigationBarItem(icon: Icon(Icons.view_kanban), label: 'Kanban'),
+          BottomNavigationBarItem(icon: Icon(Icons.folder_open), label: 'Projects'), // Updated icon and label
           BottomNavigationBarItem(icon: Icon(Icons.person), label: 'Profile'),
         ],
         currentIndex: _selectedIndex,

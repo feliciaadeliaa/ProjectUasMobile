@@ -6,7 +6,7 @@ import 'screens/add_task_screen.dart';
 import 'screens/profile_screen.dart';
 import 'screens/login_screen.dart';
 import 'screens/register_screen.dart';
-import 'screens/kanban_screen.dart';
+import 'screens/enhanced_projects_screen.dart'; // Updated import
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -18,8 +18,8 @@ void main() async {
     initial: prefs.getString('pb_auth'),
   );
 
-  // Inisialisasi PocketBase
-  final pb = PocketBase('http://localhost:8090', authStore: store);
+  // Inisialisasi PocketBase - gunakan URL yang konsisten
+  final pb = PocketBase('http://127.0.0.1:8090', authStore: store);
 
   // Tentukan rute awal berdasarkan status autentikasi
   final initialRoute = pb.authStore.isValid ? '/' : '/login';
@@ -157,7 +157,7 @@ class TaskFlowApp extends StatelessWidget {
             '/': (context) => HomeScreen(pb: pb),
             '/add_task': (context) => AddTaskScreen(pb: pb),
             '/profile': (context) => ProfileScreen(pb: pb),
-            '/kanban': (context) => KanbanScreen(pb: pb),
+            '/projects': (context) => EnhancedProjectsScreen(pb: pb), // Updated route
           },
         );
       },
