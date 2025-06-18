@@ -7,6 +7,10 @@ class Task {
   final DateTime createdAt;
   final DateTime updatedAt;
   final List<Todo> todos;
+  // Add project-related fields
+  final String? projectId;
+  final String? boardId;
+  final String? columnId;
 
   Task({
     required this.id,
@@ -17,6 +21,9 @@ class Task {
     required this.createdAt,
     required this.updatedAt,
     this.todos = const [],
+    this.projectId,
+    this.boardId,
+    this.columnId,
   });
 
   factory Task.fromJson(Map<String, dynamic> json) {
@@ -31,23 +38,34 @@ class Task {
       todos: (json['todos'] as List<dynamic>?)
           ?.map((todo) => Todo.fromJson(todo as Map<String, dynamic>))
           .toList() ?? [],
+      // Add project-related fields
+      projectId: json['projectId'],
+      boardId: json['boardId'],
+      columnId: json['columnId'],
     );
   }
 
   Map<String, dynamic> toJson() {
-    return {
+    final Map<String, dynamic> data = {
       'title': title,
       'description': description,
       'completed': completed,
       'userId': userId,
       'todos': todos.map((todo) => todo.toJson()).toList(),
     };
+    
+    // Add project-related fields if they exist
+    if (projectId != null) data['projectId'] = projectId;
+    if (boardId != null) data['boardId'] = boardId;
+    if (columnId != null) data['columnId'] = columnId;
+    
+    return data;
   }
 
   // Method untuk debugging
   @override
   String toString() {
-    return 'Task{id: $id, title: $title, description: $description, completed: $completed, userId: $userId, todos: ${todos.length}}';
+    return 'Task{id: $id, title: $title, description: $description, completed: $completed, userId: $userId, todos: ${todos.length}, projectId: $projectId}';
   }
 }
 

@@ -6,7 +6,7 @@ import 'screens/add_task_screen.dart';
 import 'screens/profile_screen.dart';
 import 'screens/login_screen.dart';
 import 'screens/register_screen.dart';
-import 'screens/enhanced_projects_screen.dart'; // Updated import
+import 'screens/projects_screen.dart'; // Updated import
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -155,9 +155,10 @@ class TaskFlowApp extends StatelessWidget {
             '/login': (context) => LoginScreen(pb: pb),
             '/register': (context) => RegisterScreen(pb: pb),
             '/': (context) => HomeScreen(pb: pb),
+            '/home': (context) => HomeScreen(pb: pb), // Add alias for safety
             '/add_task': (context) => AddTaskScreen(pb: pb),
             '/profile': (context) => ProfileScreen(pb: pb),
-            '/projects': (context) => EnhancedProjectsScreen(pb: pb), // Updated route
+            '/projects': (context) => ProjectsScreen(pb: pb),
           },
         );
       },

@@ -246,6 +246,11 @@ class ProjectTask extends Task {
   final String? assigneeId;
   final String? parentTaskId;
   final DateTime? startDate;
+  final DateTime? dueDate;
+  final TaskPriority priority;
+  final TaskStatus status;
+  final double? estimatedHours;
+  final double? actualHours;
   final Map<String, dynamic> customFields;
 
   ProjectTask({
@@ -263,6 +268,11 @@ class ProjectTask extends Task {
     this.assigneeId,
     this.parentTaskId,
     this.startDate,
+    this.dueDate,
+    required this.priority,
+    this.status = TaskStatus.todo,
+    this.estimatedHours,
+    this.actualHours,
     this.customFields = const {},
   }) : super(
     createdAt: createdAt ?? DateTime.now(),
@@ -287,6 +297,11 @@ class ProjectTask extends Task {
       assigneeId: json['assigneeId'],
       parentTaskId: json['parentTaskId'],
       startDate: json['startDate'] != null ? DateTime.parse(json['startDate']) : null,
+      dueDate: json['dueDate'] != null ? DateTime.parse(json['dueDate']) : null,
+      priority: TaskPriority.fromString(json['priority'] ?? 'medium'),
+      status: TaskStatus.fromString(json['status'] ?? 'todo'),
+      estimatedHours: json['estimatedHours']?.toDouble(),
+      actualHours: json['actualHours']?.toDouble(),
       customFields: Map<String, dynamic>.from(json['customFields'] ?? {}),
     );
   }
@@ -301,6 +316,11 @@ class ProjectTask extends Task {
       'assigneeId': assigneeId,
       'parentTaskId': parentTaskId,
       'startDate': startDate?.toIso8601String(),
+      'dueDate': dueDate?.toIso8601String(),
+      'priority': priority.value,
+      'status': status.value,
+      'estimatedHours': estimatedHours,
+      'actualHours': actualHours,
       'customFields': customFields,
     });
     return json;
@@ -544,5 +564,70 @@ enum EntityType {
       (type) => type.value == value,
       orElse: () => EntityType.task,
     );
+  }
+}
+
+// Task Priority Enum
+enum TaskPriority {
+  low('low'),
+  medium('medium'),
+  high('high'),
+  urgent('urgent');
+
+  const TaskPriority(this.value);
+  final String value;
+
+  static TaskPriority fromString(String value) {
+    return TaskPriority.values.firstWhere(
+      (priority) => priority.value == value,
+      orElse: () => TaskPriority.medium,
+    );
+  }
+
+  String get displayName {
+    switch (this) {
+      case TaskPriority.low:
+        return 'Low';
+      case TaskPriority.medium:
+        return 'Medium';
+      case TaskPriority.high:
+        return 'High';
+      case TaskPriority.urgent:
+        return 'Urgent';
+    }
+  }
+}
+
+// Task Status Enum
+enum TaskStatus {
+  todo('todo'),
+  inProgress('in_progress'),
+  review('review'),
+  done('done'),
+  blocked('blocked');
+
+  const TaskStatus(this.value);
+  final String value;
+
+  static TaskStatus fromString(String value) {
+    return TaskStatus.values.firstWhere(
+      (status) => status.value == value,
+      orElse: () => TaskStatus.todo,
+    );
+  }
+
+  String get displayName {
+    switch (this) {
+      case TaskStatus.todo:
+        return 'To Do';
+      case TaskStatus.inProgress:
+        return 'In Progress';
+      case TaskStatus.review:
+        return 'Review';
+      case TaskStatus.done:
+        return 'Done';
+      case TaskStatus.blocked:
+        return 'Blocked';
+    }
   }
 }

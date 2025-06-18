@@ -19,7 +19,7 @@ class _ProjectsScreenState extends State<ProjectsScreen> {
   bool _isLoading = true;
   late ProjectService projectService;
   late SafeContext _safeContext;
-  int _selectedIndex = 4; // New tab for projects
+  int _selectedIndex = 2; // Projects tab index after removing Kanban
 
   @override
   void initState() {
@@ -115,20 +115,128 @@ class _ProjectsScreenState extends State<ProjectsScreen> {
     );
   }
 
+  Future<void> _editProject(Project project) async {
+  // Show loading indicator
+  showDialog(
+    context: context,
+    barrierDismissible: false,
+    builder: (context) => const Center(
+      child: CircularProgressIndicator(),
+    ),
+  );
+
+  try {
+    // Close loading dialog
+    Navigator.pop(context);
+    
+    final result = await showDialog<Map<String, String>>(
+      context: context,
+      builder: (context) => _EditProjectDialog(project: project),
+    );
+
+    if (result != null) {
+      // Show loading again during update
+      showDialog(
+        context: context,
+        barrierDismissible: false,
+        builder: (context) => const Center(
+          child: CircularProgressIndicator(),
+        ),
+      );
+
+      try {
+        final updatedProject = Project(
+          id: project.id,
+          name: result['name']!,
+          description: result['description']!,
+          color: result['color'] ?? project.color,
+          icon: result['icon'] ?? project.icon,
+          userId: project.userId,
+          createdAt: project.createdAt,
+          updatedAt: DateTime.now(),
+        );
+
+        final savedProject = await projectService.updateProject(updatedProject);
+        
+        // Close loading dialog
+        Navigator.pop(context);
+        
+        if (!mounted) return;
+        
+        setState(() {
+          final index = projects.indexWhere((p) => p.id == project.id);
+          if (index != -1) {
+            projects[index] = savedProject;
+          }
+        });
+        
+        _safeContext.showSnackBar('Project updated successfully!', Colors.green);
+      } catch (e) {
+        // Close loading dialog
+        Navigator.pop(context);
+        _safeContext.showSnackBar('Failed to update project: $e', Colors.red);
+      }
+    }
+  } catch (e) {
+    // Close loading dialog if still open
+    Navigator.pop(context);
+    _safeContext.showSnackBar('Error opening edit dialog: $e', Colors.red);
+  }
+}
+
+  Future<void> _deleteProject(Project project) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Delete Project'),
+        content: Text('Are you sure you want to delete "${project.name}"?\n\nThis will archive the project and all its data.'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('Cancel'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(context, true),
+            style: TextButton.styleFrom(foregroundColor: Colors.red),
+            child: const Text('Delete'),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmed == true) {
+      try {
+        await projectService.deleteProject(project.id);
+        
+        if (!mounted) return;
+        
+        setState(() {
+          projects.removeWhere((p) => p.id == project.id);
+        });
+        
+        _safeContext.showSnackBar('Project deleted successfully!', Colors.green);
+      } catch (e) {
+        _safeContext.showSnackBar('Failed to delete project: $e', Colors.red);
+      }
+    }
+  }
+
   void _onItemTapped(int index) {
     if (!mounted) return;
     
     setState(() {
       _selectedIndex = index;
     });
+    
     if (index == 0) {
       Navigator.pushReplacementNamed(context, '/');
+    } else if (index == 1) {
+      Navigator.pushReplacementNamed(context, '/add_task');
     } else if (index == 2) {
-      Navigator.pushReplacementNamed(context, '/projects'); // Updated from '/kanban' to '/projects'
-    } else if (index == 3) {
       Navigator.pushReplacementNamed(context, '/profile');
     }
-  }
+  // Note: index 2 is current screen (Projects), so no navigation needed
+}
 
   @override
   Widget build(BuildContext context) {
@@ -159,16 +267,16 @@ class _ProjectsScreenState extends State<ProjectsScreen> {
         tooltip: 'Create Project',
       ),
       bottomNavigationBar: BottomNavigationBar(
-        type: BottomNavigationBarType.fixed,
-        items: const [
-          BottomNavigationBarItem(icon: Icon(Icons.home), label: 'Home'),
-          BottomNavigationBarItem(icon: Icon(Icons.add), label: 'Add Task'),
-          BottomNavigationBarItem(icon: Icon(Icons.folder_open), label: 'Projects'), // Updated icon and label
-          BottomNavigationBarItem(icon: Icon(Icons.person), label: 'Profile'),
-        ],
-        currentIndex: _selectedIndex,
-        onTap: _onItemTapped,
-      ),
+  type: BottomNavigationBarType.fixed,
+  items: const [
+    BottomNavigationBarItem(icon: Icon(Icons.home), label: 'Home'),
+    BottomNavigationBarItem(icon: Icon(Icons.add), label: 'Add Task'),
+    BottomNavigationBarItem(icon: Icon(Icons.folder_open), label: 'Projects'),
+    BottomNavigationBarItem(icon: Icon(Icons.person), label: 'Profile'),
+  ],
+  currentIndex: _selectedIndex,
+  onTap: _onItemTapped,
+),
     );
   }
 
@@ -340,37 +448,44 @@ class _ProjectsScreenState extends State<ProjectsScreen> {
                     ),
                   ),
                   PopupMenuButton<String>(
-                    onSelected: (value) {
-                      if (value == 'edit') {
-                        // TODO: Edit project
-                      } else if (value == 'delete') {
-                        // TODO: Delete project
-                      }
-                    },
-                    itemBuilder: (context) => [
-                      const PopupMenuItem(
-                        value: 'edit',
-                        child: Row(
-                          children: [
-                            Icon(Icons.edit),
-                            SizedBox(width: 8),
-                            Text('Edit'),
-                          ],
-                        ),
-                      ),
-                      const PopupMenuItem(
-                        value: 'delete',
-                        child: Row(
-                          children: [
-                            Icon(Icons.delete, color: Colors.red),
-                            SizedBox(width: 8),
-                            Text('Delete', style: TextStyle(color: Colors.red)),
-                          ],
-                        ),
-                      ),
-                    ],
-                    child: Icon(Icons.more_vert, color: Colors.grey[600]),
-                  ),
+  onSelected: (value) async {
+    if (value == 'edit') {
+      await _editProject(project);
+    } else if (value == 'delete') {
+      await _deleteProject(project);
+    }
+  },
+  itemBuilder: (context) => [
+    const PopupMenuItem(
+      value: 'edit',
+      child: Row(
+        children: [
+          Icon(Icons.edit, color: Colors.blue),
+          SizedBox(width: 8),
+          Text('Edit Project'),
+        ],
+      ),
+    ),
+    const PopupMenuItem(
+      value: 'delete',
+      child: Row(
+        children: [
+          Icon(Icons.delete, color: Colors.red),
+          SizedBox(width: 8),
+          Text('Delete Project', style: TextStyle(color: Colors.red)),
+        ],
+      ),
+    ),
+  ],
+  icon: Container(
+    padding: const EdgeInsets.all(4),
+    decoration: BoxDecoration(
+      color: Colors.grey[200],
+      borderRadius: BorderRadius.circular(6),
+    ),
+    child: Icon(Icons.more_vert, color: Colors.grey[700], size: 20),
+  ),
+)
                 ],
               ),
               
@@ -635,6 +750,207 @@ class _CreateProjectDialogState extends State<_CreateProjectDialog> {
           child: const Text('Create'),
         ),
       ],
+    );
+  }
+}
+
+class _EditProjectDialog extends StatefulWidget {
+  final Project project;
+
+  const _EditProjectDialog({required this.project});
+
+  @override
+  _EditProjectDialogState createState() => _EditProjectDialogState();
+}
+
+class _EditProjectDialogState extends State<_EditProjectDialog> {
+  late TextEditingController _nameController;
+  late TextEditingController _descriptionController;
+  late String _selectedColor;
+  late String _selectedIcon;
+
+  final List<Map<String, dynamic>> _colors = [
+    {'name': 'Blue', 'value': '#6366F1'},
+    {'name': 'Green', 'value': '#10B981'},
+    {'name': 'Purple', 'value': '#8B5CF6'},
+    {'name': 'Red', 'value': '#EF4444'},
+    {'name': 'Orange', 'value': '#F59E0B'},
+    {'name': 'Pink', 'value': '#EC4899'},
+  ];
+
+  final List<Map<String, dynamic>> _icons = [
+    {'name': 'Folder', 'value': 'folder', 'icon': Icons.folder},
+    {'name': 'Work', 'value': 'work', 'icon': Icons.work},
+    {'name': 'Home', 'value': 'home', 'icon': Icons.home},
+    {'name': 'School', 'value': 'school', 'icon': Icons.school},
+    {'name': 'Shopping', 'value': 'shopping', 'icon': Icons.shopping_cart},
+    {'name': 'Health', 'value': 'health', 'icon': Icons.favorite},
+  ];
+
+  @override
+  void initState() {
+    super.initState();
+    _nameController = TextEditingController(text: widget.project.name);
+    _descriptionController = TextEditingController(text: widget.project.description);
+    _selectedColor = widget.project.color;
+    _selectedIcon = widget.project.icon;
+  }
+
+  @override
+  void dispose() {
+    _nameController.dispose();
+    _descriptionController.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      title: const Text('Edit Project'),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+      content: SingleChildScrollView(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            // Project Name
+            TextField(
+              controller: _nameController,
+              decoration: const InputDecoration(
+                labelText: 'Project Name *',
+                hintText: 'Enter project name',
+                border: OutlineInputBorder(),
+              ),
+              textCapitalization: TextCapitalization.words,
+            ),
+            
+            const SizedBox(height: 16),
+            
+            // Project Description
+            TextField(
+              controller: _descriptionController,
+              decoration: const InputDecoration(
+                labelText: 'Description',
+                hintText: 'Enter project description',
+                border: OutlineInputBorder(),
+              ),
+              maxLines: 3,
+              textCapitalization: TextCapitalization.sentences,
+            ),
+            
+            const SizedBox(height: 16),
+            
+            // Color Selection
+            const Text(
+              'Choose Color:',
+              style: TextStyle(fontWeight: FontWeight.w500),
+            ),
+            const SizedBox(height: 8),
+            Wrap(
+              spacing: 8,
+              children: _colors.map((colorData) {
+                final color = Color(int.parse(colorData['value'].replaceFirst('#', '0xFF')));
+                final isSelected = _selectedColor == colorData['value'];
+                
+                return GestureDetector(
+                  onTap: () {
+                    setState(() {
+                      _selectedColor = colorData['value'];
+                    });
+                  },
+                  child: Container(
+                    width: 40,
+                    height: 40,
+                    decoration: BoxDecoration(
+                      color: color,
+                      shape: BoxShape.circle,
+                      border: isSelected
+                          ? Border.all(color: Colors.black, width: 3)
+                          : null,
+                    ),
+                    child: isSelected
+                        ? const Icon(Icons.check, color: Colors.white)
+                        : null,
+                  ),
+                );
+              }).toList(),
+            ),
+            
+            const SizedBox(height: 16),
+            
+            // Icon Selection
+            const Text(
+              'Choose Icon:',
+              style: TextStyle(fontWeight: FontWeight.w500),
+            ),
+            const SizedBox(height: 8),
+            Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              children: _icons.map((iconData) {
+                final isSelected = _selectedIcon == iconData['value'];
+                
+                return GestureDetector(
+                  onTap: () {
+                    setState(() {
+                      _selectedIcon = iconData['value'];
+                    });
+                  },
+                  child: Container(
+                    width: 50,
+                    height: 50,
+                    decoration: BoxDecoration(
+                      color: isSelected ? Colors.blue[100] : Colors.grey[100],
+                      borderRadius: BorderRadius.circular(8),
+                      border: isSelected
+                          ? Border.all(color: Colors.blue, width: 2)
+                          : Border.all(color: Colors.grey[300]!),
+                    ),
+                    child: Icon(
+                      iconData['icon'],
+                      color: isSelected ? Colors.blue : Colors.grey[600],
+                    ),
+                  ),
+                );
+              }).toList(),
+            ),
+          ],
+        ),
+      ),
+      actions: [
+  TextButton(
+    onPressed: () => Navigator.pop(context),
+    child: const Text('Cancel'),
+  ),
+  ElevatedButton(
+    onPressed: () {
+      // Validation
+      if (_nameController.text.trim().isEmpty) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Please enter project name'),
+            backgroundColor: Colors.red,
+          ),
+        );
+        return;
+      }
+      
+      // Return updated data
+      Navigator.pop(context, {
+        'name': _nameController.text.trim(),
+        'description': _descriptionController.text.trim(),
+        'color': _selectedColor,
+        'icon': _selectedIcon,
+      });
+    },
+    style: ElevatedButton.styleFrom(
+      backgroundColor: Colors.blue,
+      foregroundColor: Colors.white,
+      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
+    ),
+    child: const Text('Update Project'),
+  ),
+],
     );
   }
 }

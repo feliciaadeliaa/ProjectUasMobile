@@ -18,10 +18,10 @@ class ProjectKanbanScreen extends StatefulWidget {
   });
 
   @override
-  _ProjectKanbanScreenState createState() => _ProjectKanbanScreenState();
+  ProjectKanbanScreenState createState() => ProjectKanbanScreenState();
 }
 
-class _ProjectKanbanScreenState extends State<ProjectKanbanScreen> {
+class ProjectKanbanScreenState extends State<ProjectKanbanScreen> {
   List<BoardColumn> columns = [];
   List<Task> allTasks = [];
   bool _isLoading = true;
@@ -62,7 +62,7 @@ class _ProjectKanbanScreenState extends State<ProjectKanbanScreen> {
       final boards = await projectService.getProjectBoards(widget.project.id);
       
       if (boards.isNotEmpty) {
-        currentBoard = boards.first; // Use first board or default board
+        currentBoard = boards.first;
         
         // Get board columns
         final boardColumns = await projectService.getBoardColumns(currentBoard!.id);
@@ -82,8 +82,8 @@ class _ProjectKanbanScreenState extends State<ProjectKanbanScreen> {
         });
         
         debugPrint('✅ Loaded project data: ${columns.length} columns, ${tasks.length} tasks');
+        debugPrint('📋 Tasks loaded: ${tasks.map((t) => '${t.title} - ${_getTaskStatus(t)}').join(', ')}');
       } else {
-        // No boards found, this shouldn't happen if project creation works correctly
         setState(() {
           _isLoading = false;
         });
@@ -101,21 +101,28 @@ class _ProjectKanbanScreenState extends State<ProjectKanbanScreen> {
   }
 
   List<Task> _getTasksForColumn(String columnId) {
-    return allTasks.where((task) {
-      // For now, we'll use task status to determine column
-      // This is a simplified approach - in a full implementation,
-      // tasks would have a columnId field
-      if (columnId.contains('todo') || columnId.contains('To Do')) {
-        return !task.completed && _getTaskProgress(task) == 0;
-      } else if (columnId.contains('progress') || columnId.contains('In Progress')) {
-        return !task.completed && _getTaskProgress(task) > 0 && _getTaskProgress(task) < 1;
-      } else if (columnId.contains('review') || columnId.contains('Review')) {
-        return !task.completed && _getTaskProgress(task) == 1;
-      } else if (columnId.contains('done') || columnId.contains('Done')) {
-        return task.completed;
-      }
-      return false;
+    final column = columns.firstWhere((col) => col.id == columnId, orElse: () => columns.first);
+    final columnName = column.name.toLowerCase();
+    
+    // Determine expected status for this column
+    String expectedStatus = 'todo';
+    if (columnName.contains('progress') || columnName.contains('in progress')) {
+      expectedStatus = 'in_progress';
+    } else if (columnName.contains('review')) {
+      expectedStatus = 'review';
+    } else if (columnName.contains('done') || columnName.contains('completed')) {
+      expectedStatus = 'done';
+    }
+    
+    final filteredTasks = allTasks.where((task) {
+      final taskStatus = _getTaskStatus(task);
+      final matches = taskStatus == expectedStatus;
+      return matches;
     }).toList();
+    
+    debugPrint('🔍 Column ${column.name} expects: $expectedStatus, found: ${filteredTasks.map((t) => '${t.title}(${_getTaskStatus(t)})').join(', ')}');
+    
+    return filteredTasks;
   }
 
   double _getTaskProgress(Task task) {
@@ -124,29 +131,54 @@ class _ProjectKanbanScreenState extends State<ProjectKanbanScreen> {
     return completedTodos / task.todos.length;
   }
 
+  String _getStatusFromColumn(String columnName) {
+    final lowerColumnName = columnName.toLowerCase();
+    if (lowerColumnName.contains('progress') || lowerColumnName.contains('in progress')) {
+      return 'in_progress';
+    } else if (lowerColumnName.contains('review')) {
+      return 'review';
+    } else if (lowerColumnName.contains('done') || lowerColumnName.contains('completed')) {
+      return 'done';
+    } else {
+      return 'todo';
+    }
+  }
+
   Future<void> _createTask(String columnName) async {
-    final result = await showDialog<Map<String, String>>(
+    final result = await showDialog<Map<String, dynamic>>(
       context: context,
-      builder: (context) => _CreateTaskDialog(columnName: columnName),
+      builder: (context) => _CreateTaskDialog(
+        columnName: columnName,
+        projectId: widget.project.id,
+        boardId: currentBoard?.id ?? '',
+      ),
     );
 
     if (result != null && currentBoard != null) {
       try {
-        final task = Task(
-          id: '',
-          title: result['title']!,
-          description: result['description'] ?? '',
-          userId: widget.pb.authStore.model?.id ?? '',
-          createdAt: DateTime.now(),
-          updatedAt: DateTime.now(),
-          todos: [],
-        );
-
-        // Find the appropriate column
         final targetColumn = columns.firstWhere(
           (col) => col.name.toLowerCase().contains(columnName.toLowerCase()),
           orElse: () => columns.first,
         );
+
+        final status = _getStatusFromColumn(columnName);
+        String description = result['description'] ?? '';
+        
+        // Add status tag to description for tracking
+        description = _addStatusToDescription(description, status);
+
+        final task = Task(
+          id: '',
+          title: result['title']!,
+          description: description,
+          userId: widget.pb.authStore.model?.id ?? '',
+          createdAt: DateTime.now(),
+          updatedAt: DateTime.now(),
+          todos: result['todos'] ?? [],
+          completed: status == 'done',
+        );
+
+        debugPrint('🆕 Creating task "${task.title}" with status: $status in column: $columnName');
 
         final createdTask = await projectService.createProjectTask(
           task,
@@ -161,10 +193,25 @@ class _ProjectKanbanScreenState extends State<ProjectKanbanScreen> {
           allTasks.insert(0, createdTask);
         });
         
-        _safeContext.showSnackBar('Task created successfully!', Colors.green);
+        debugPrint('✅ Task created successfully: ${createdTask.title} - Status: ${_getTaskStatus(createdTask)}');
+        _safeContext.showSnackBar('Task created successfully in $columnName!', Colors.green);
       } catch (e) {
+        debugPrint('❌ Error creating task: $e');
         _safeContext.showSnackBar('Failed to create task: $e', Colors.red);
       }
+    }
+  }
+
+  String _addStatusToDescription(String description, String status) {
+    // Remove existing status tag if present
+    description = description.replaceAll(RegExp(r'\[STATUS:\w+\]'), '').trim();
+    
+    // Add new status tag
+    final statusTag = '[STATUS:${status.toUpperCase()}]';
+    if (description.isNotEmpty) {
+      return '$description $statusTag';
+    } else {
+      return statusTag;
     }
   }
 
@@ -175,21 +222,231 @@ class _ProjectKanbanScreenState extends State<ProjectKanbanScreen> {
       context: context,
       builder: (context) => TaskDetailDialog(
         task: task,
-        onToggleTodo: (task, todoIndex) async {
-          // TODO: Implement todo toggle
-        },
-        onToggleTask: (task) async {
-          // TODO: Implement task toggle
-        },
-        onEditTask: (task) async {
-          // TODO: Implement task edit
-        },
-        onDeleteTask: (task) async {
-          // TODO: Implement task delete
-        },
+        onToggleTodo: _toggleTodo,
+        onToggleTask: _toggleTask,
+        onEditTask: _editTask,
+        onDeleteTask: _deleteTask,
       ),
     );
   }
+
+  Future<void> _toggleTodo(Task task, int todoIndex) async {
+    try {
+      final updatedTodos = List<Todo>.from(task.todos);
+      updatedTodos[todoIndex] = Todo(
+        title: updatedTodos[todoIndex].title,
+        completed: !updatedTodos[todoIndex].completed,
+      );
+
+      final updatedTask = Task(
+        id: task.id,
+        title: task.title,
+        description: task.description,
+        completed: task.completed,
+        userId: task.userId,
+        createdAt: task.createdAt,
+        updatedAt: DateTime.now(),
+        todos: updatedTodos,
+      );
+
+      await projectService.updateProjectTask(updatedTask);
+      
+      if (!mounted) return;
+      
+      setState(() {
+        final index = allTasks.indexWhere((t) => t.id == task.id);
+        if (index != -1) {
+          allTasks[index] = updatedTask;
+        }
+      });
+    } catch (e) {
+      _safeContext.showSnackBar('Failed to update todo: $e', Colors.red);
+    }
+  }
+
+  Future<void> _toggleTask(Task task) async {
+    try {
+      final updatedTask = Task(
+        id: task.id,
+        title: task.title,
+        description: task.description,
+        completed: !task.completed,
+        userId: task.userId,
+        createdAt: task.createdAt,
+        updatedAt: DateTime.now(),
+        todos: task.todos,
+      );
+
+      await projectService.updateProjectTask(updatedTask);
+      
+      if (!mounted) return;
+      
+      setState(() {
+        final index = allTasks.indexWhere((t) => t.id == task.id);
+        if (index != -1) {
+          allTasks[index] = updatedTask;
+        }
+      });
+    } catch (e) {
+      _safeContext.showSnackBar('Failed to update task: $e', Colors.red);
+    }
+  }
+
+  Future<void> _editTask(Task task) async {
+    final result = await showDialog<Task>(
+      context: context,
+      builder: (context) => EditTaskDialog(
+        task: task,
+        onSave: (updatedTask) async {
+          return await projectService.updateProjectTask(updatedTask);
+        },
+      ),
+    );
+
+    if (result != null) {
+      setState(() {
+        final index = allTasks.indexWhere((t) => t.id == task.id);
+        if (index != -1) {
+          allTasks[index] = result;
+        }
+      });
+      _safeContext.showSnackBar('Task updated successfully!', Colors.green);
+    }
+  }
+
+  Future<void> _deleteTask(Task task) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Delete Task'),
+        content: Text('Are you sure you want to delete "${task.title}"?'),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('Cancel'),
+          ),
+          ElevatedButton(
+            onPressed: () => Navigator.pop(context, true),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: Colors.red,
+              foregroundColor: Colors.white,
+            ),
+            child: const Text('Delete'),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmed == true) {
+      try {
+        await projectService.deleteProjectTask(task.id);
+        
+        if (!mounted) return;
+        
+        setState(() {
+          allTasks.removeWhere((t) => t.id == task.id);
+        });
+        
+        Navigator.pop(context); // Close task detail dialog
+        _safeContext.showSnackBar('Task deleted successfully!', Colors.green);
+      } catch (e) {
+        _safeContext.showSnackBar('Failed to delete task: $e', Colors.red);
+      }
+    }
+  }
+
+  Future<void> _moveTask(Task task, String targetColumnId) async {
+  final targetColumn = columns.firstWhere((col) => col.id == targetColumnId);
+  final newStatus = _getStatusFromColumn(targetColumn.name);
+  final oldStatus = _getTaskStatus(task);
+  
+  debugPrint('🔄 Moving task "${task.title}" from $oldStatus to $newStatus (${targetColumn.name})');
+  
+  if (oldStatus == newStatus) {
+    debugPrint('⚠️ Task already in correct status, skipping move');
+    return;
+  }
+  
+  try {
+    // Clean description and add new status
+    String cleanDescription = task.description.replaceAll(RegExp(r'\[STATUS:\w+\]'), '').trim();
+    String updatedDescription = _addStatusToDescription(cleanDescription, newStatus);
+    
+    final updatedTask = Task(
+      id: task.id,
+      title: task.title,
+      description: updatedDescription,
+      completed: newStatus == 'done',
+      userId: task.userId,
+      createdAt: task.createdAt,
+      updatedAt: DateTime.now(),
+      todos: task.todos,
+    );
+
+    debugPrint('💾 Updating task with new description: "$updatedDescription"');
+    
+    await projectService.updateProjectTask(updatedTask);
+    
+    if (!mounted) return;
+    
+    setState(() {
+      final index = allTasks.indexWhere((t) => t.id == task.id);
+      if (index != -1) {
+        allTasks[index] = updatedTask;
+        debugPrint('✅ Task updated in local state');
+      }
+    });
+    
+    // Force refresh to ensure UI updates
+    await Future.delayed(const Duration(milliseconds: 100));
+    if (mounted) {
+      setState(() {});
+    }
+    
+    debugPrint('✅ Task moved successfully: ${updatedTask.title} - New status: ${_getTaskStatus(updatedTask)}');
+    _safeContext.showSnackBar('Task moved to ${targetColumn.name}!', Colors.green);
+  } catch (e) {
+    debugPrint('❌ Error moving task: $e');
+    _safeContext.showSnackBar('Failed to move task: $e', Colors.red);
+  }
+}
+
+  String _getTaskStatus(Task task) {
+  // First check for explicit status tag in description
+  if (task.description.contains('[STATUS:')) {
+    final statusMatch = RegExp(r'\[STATUS:(\w+)\]').firstMatch(task.description);
+    if (statusMatch != null) {
+      final status = statusMatch.group(1)?.toLowerCase() ?? 'todo';
+      debugPrint('📋 Task "${task.title}" has explicit status: $status');
+      return status;
+    }
+  }
+  
+  // Fallback logic based on completion and progress
+  final progress = _getTaskProgress(task);
+  String fallbackStatus = 'todo';
+  
+  if (task.completed) {
+    fallbackStatus = 'done';
+  } else if (progress == 1.0) {
+    fallbackStatus = 'review';
+  } else if (progress > 0) {
+    fallbackStatus = 'in_progress';
+  }
+  
+  debugPrint('📋 Task "${task.title}" fallback status: $fallbackStatus (progress: $progress, completed: ${task.completed})');
+  return fallbackStatus;
+}
+
+  void _debugTaskStatuses() {
+  debugPrint('🐛 === DEBUGGING TASK STATUSES ===');
+  for (final task in allTasks) {
+    final status = _getTaskStatus(task);
+    debugPrint('🐛 Task: "${task.title}" | Status: $status | Description: "${task.description}"');
+  }
+  debugPrint('🐛 === END DEBUG ===');
+}
 
   @override
   Widget build(BuildContext context) {
@@ -208,44 +465,18 @@ class _ProjectKanbanScreenState extends State<ProjectKanbanScreen> {
               ),
           ],
         ),
-        backgroundColor: projectColor.withOpacity(0.1),
+        backgroundColor: projectColor.withValues(alpha: 0.1),
         elevation: 0,
         actions: [
+          IconButton(
+            onPressed: _debugTaskStatuses,
+            icon: const Icon(Icons.bug_report),
+            tooltip: 'Debug',
+          ),
           IconButton(
             onPressed: _loadProjectData,
             icon: const Icon(Icons.refresh),
             tooltip: 'Refresh',
-          ),
-          PopupMenuButton<String>(
-            onSelected: (value) {
-              if (value == 'settings') {
-                // TODO: Project settings
-              } else if (value == 'members') {
-                // TODO: Project members
-              }
-            },
-            itemBuilder: (context) => [
-              const PopupMenuItem(
-                value: 'settings',
-                child: Row(
-                  children: [
-                    Icon(Icons.settings),
-                    SizedBox(width: 8),
-                    Text('Project Settings'),
-                  ],
-                ),
-              ),
-              const PopupMenuItem(
-                value: 'members',
-                child: Row(
-                  children: [
-                    Icon(Icons.people),
-                    SizedBox(width: 8),
-                    Text('Manage Members'),
-                  ],
-                ),
-              ),
-            ],
           ),
         ],
       ),
@@ -259,7 +490,7 @@ class _ProjectKanbanScreenState extends State<ProjectKanbanScreen> {
                   children: [
                     // Project Stats
                     Card(
-                      color: projectColor.withOpacity(0.1),
+                      color: projectColor.withValues(alpha: 0.1),
                       child: Padding(
                         padding: const EdgeInsets.all(16.0),
                         child: Row(
@@ -316,7 +547,7 @@ class _ProjectKanbanScreenState extends State<ProjectKanbanScreen> {
                                 final columnColor = Color(int.parse(column.color.replaceFirst('#', '0xFF')));
                                 
                                 return _buildKanbanColumn(
-                                  title: column.name,
+                                  column: column,
                                   tasks: columnTasks,
                                   color: columnColor,
                                   onAddTask: () => _createTask(column.name),
@@ -349,132 +580,265 @@ class _ProjectKanbanScreenState extends State<ProjectKanbanScreen> {
               color: Colors.grey[600],
             ),
           ),
-          const SizedBox(height: 8),
-          Text(
-            'Please wait while we prepare your kanban board',
-            style: TextStyle(
-              fontSize: 14,
-              color: Colors.grey[500],
-            ),
-          ),
         ],
       ),
     );
   }
 
   Widget _buildKanbanColumn({
-    required String title,
-    required List<Task> tasks,
-    required Color color,
-    required VoidCallback onAddTask,
-  }) {
-    return Expanded(
-      child: Container(
-        margin: const EdgeInsets.symmetric(horizontal: 4),
-        decoration: BoxDecoration(
-          color: color.withOpacity(0.1),
-          borderRadius: BorderRadius.circular(12),
-          border: Border.all(color: color.withOpacity(0.3)),
-        ),
-        child: Column(
-          children: [
-            // Column Header
-            Container(
-              padding: const EdgeInsets.all(12),
-              decoration: BoxDecoration(
-                color: color.withOpacity(0.2),
-                borderRadius: const BorderRadius.only(
-                  topLeft: Radius.circular(12),
-                  topRight: Radius.circular(12),
-                ),
-              ),
-              child: Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                children: [
-                  Expanded(
-                    child: Text(
-                      title,
-                      style: TextStyle(
-                        fontWeight: FontWeight.bold,
-                        color: color.withOpacity(0.8),
-                        fontSize: 14,
-                      ),
-                    ),
-                  ),
-                  Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                    decoration: BoxDecoration(
-                      color: color,
-                      borderRadius: BorderRadius.circular(12),
-                    ),
-                    child: Text(
-                      '${tasks.length}',
-                      style: const TextStyle(
-                        color: Colors.white,
-                        fontWeight: FontWeight.bold,
-                        fontSize: 12,
-                      ),
-                    ),
-                  ),
-                ],
-              ),
+  required BoardColumn column,
+  required List<Task> tasks,
+  required Color color,
+  required VoidCallback onAddTask,
+}) {
+  return Expanded(
+    child: DragTarget<Task>(
+      onWillAccept: (task) {
+        if (task == null) return false;
+        final taskStatus = _getTaskStatus(task);
+        final columnStatus = _getStatusFromColumn(column.name);
+        final canAccept = taskStatus != columnStatus;
+        debugPrint('🎯 Can accept "${task.title}" in "${column.name}"? $canAccept (task: $taskStatus, column: $columnStatus)');
+        return canAccept;
+      },
+      onAccept: (task) {
+        debugPrint('🎯 Task "${task.title}" accepted by column "${column.name}"');
+        _moveTask(task, column.id);
+      },
+      builder: (context, candidateData, rejectedData) {
+        final isHighlighted = candidateData.isNotEmpty;
+        
+        return Container(
+          margin: const EdgeInsets.symmetric(horizontal: 4),
+          decoration: BoxDecoration(
+            color: isHighlighted 
+                ? color.withValues(alpha: 0.3)
+                : color.withValues(alpha: 0.1),
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(
+              color: isHighlighted 
+                  ? color.withValues(alpha: 0.8)
+                  : color.withValues(alpha: 0.3),
+              width: isHighlighted ? 3 : 1,
             ),
-            
-            // Add Task Button
-            Padding(
-              padding: const EdgeInsets.all(8.0),
-              child: SizedBox(
-                width: double.infinity,
-                child: ElevatedButton.icon(
-                  onPressed: onAddTask,
-                  icon: const Icon(Icons.add, size: 16),
-                  label: const Text('Add Task', style: TextStyle(fontSize: 12)),
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: color.withOpacity(0.2),
-                    foregroundColor: color,
-                    elevation: 0,
-                    padding: const EdgeInsets.symmetric(vertical: 8),
+          ),
+          child: Column(
+            children: [
+              // Column Header
+              Container(
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: isHighlighted 
+                      ? color.withValues(alpha: 0.4)
+                      : color.withValues(alpha: 0.2),
+                  borderRadius: const BorderRadius.only(
+                    topLeft: Radius.circular(12),
+                    topRight: Radius.circular(12),
                   ),
                 ),
-              ),
-            ),
-            
-            // Tasks List
-            Expanded(
-              child: tasks.isEmpty
-                  ? Center(
-                      child: Padding(
-                        padding: const EdgeInsets.all(16.0),
-                        child: Text(
-                          'No tasks in $title',
-                          style: TextStyle(
-                            color: Colors.grey[600],
-                            fontSize: 12,
-                          ),
-                          textAlign: TextAlign.center,
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    Expanded(
+                      child: Text(
+                        column.name,
+                        style: TextStyle(
+                          fontWeight: FontWeight.bold,
+                          color: color.withValues(alpha: 0.9),
+                          fontSize: 14,
                         ),
                       ),
-                    )
-                  : ListView.builder(
-                      padding: const EdgeInsets.symmetric(horizontal: 8),
-                      itemCount: tasks.length,
-                      itemBuilder: (context, index) {
-                        final task = tasks[index];
-                        return _buildTaskCard(task, color);
-                      },
                     ),
-            ),
-          ],
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                      decoration: BoxDecoration(
+                        color: color,
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                      child: Text(
+                        '${tasks.length}',
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontWeight: FontWeight.bold,
+                          fontSize: 12,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              
+              // Add Task Button
+              Padding(
+                padding: const EdgeInsets.all(8.0),
+                child: SizedBox(
+                  width: double.infinity,
+                  child: ElevatedButton.icon(
+                    onPressed: onAddTask,
+                    icon: const Icon(Icons.add, size: 16),
+                    label: Text('Add to ${column.name}', style: const TextStyle(fontSize: 11)),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: color.withValues(alpha: 0.2),
+                      foregroundColor: color,
+                      elevation: 0,
+                      padding: const EdgeInsets.symmetric(vertical: 8),
+                    ),
+                  ),
+                ),
+              ),
+              
+              // Drop Zone Indicator
+              if (isHighlighted) ...[
+                Container(
+                  margin: const EdgeInsets.symmetric(horizontal: 8),
+                  padding: const EdgeInsets.all(16),
+                  decoration: BoxDecoration(
+                    color: color.withValues(alpha: 0.2),
+                    borderRadius: BorderRadius.circular(8),
+                    border: Border.all(
+                      color: color,
+                      width: 2,
+                      style: BorderStyle.solid,
+                    ),
+                  ),
+                  child: Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      Icon(Icons.add_circle_outline, color: color, size: 20),
+                      const SizedBox(width: 8),
+                      Text(
+                        'Drop here to move to ${column.name}',
+                        style: TextStyle(
+                          color: color,
+                          fontWeight: FontWeight.bold,
+                          fontSize: 11,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(height: 8),
+              ],
+              
+              // Tasks List
+              Expanded(
+                child: tasks.isEmpty
+                    ? Center(
+                        child: Padding(
+                          padding: const EdgeInsets.all(16.0),
+                          child: Column(
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            children: [
+                              Icon(
+                                Icons.inbox_outlined,
+                                size: 32,
+                                color: Colors.grey[400],
+                              ),
+                              const SizedBox(height: 8),
+                              Text(
+                                'No tasks in\n${column.name}',
+                                style: TextStyle(
+                                  color: Colors.grey[600],
+                                  fontSize: 12,
+                                ),
+                                textAlign: TextAlign.center,
+                              ),
+                            ],
+                          ),
+                        ),
+                      )
+                    : ListView.builder(
+                        padding: const EdgeInsets.symmetric(horizontal: 8),
+                        itemCount: tasks.length,
+                        itemBuilder: (context, index) {
+                          final task = tasks[index];
+                          return _buildTaskCard(task, color);
+                        },
+                      ),
+              ),
+            ],
+          ),
+        );
+      },
+    ),
+  );
+}
+
+  Widget _buildTaskCard(Task task, Color columnColor) {
+    final completedTodos = task.todos.where((todo) => todo.completed).length;
+    final totalTodos = task.todos.length;
+    final progress = _getTaskProgress(task);
+
+    return Draggable<Task>(
+      data: task,
+      feedback: Material(
+        elevation: 8,
+        borderRadius: BorderRadius.circular(8),
+        child: Container(
+          width: 200,
+          padding: const EdgeInsets.all(12),
+          decoration: BoxDecoration(
+            color: Colors.white,
+            borderRadius: BorderRadius.circular(8),
+            border: Border.all(color: columnColor, width: 2),
+            boxShadow: [
+              BoxShadow(
+                color: Colors.black.withValues(alpha: 0.2),
+                blurRadius: 8,
+                offset: const Offset(0, 4),
+              ),
+            ],
+          ),
+          child: Text(
+            task.title,
+            style: const TextStyle(fontWeight: FontWeight.bold),
+            maxLines: 2,
+            overflow: TextOverflow.ellipsis,
+          ),
         ),
       ),
+      childWhenDragging: Opacity(
+        opacity: 0.3,
+        child: _buildTaskCardContent(task, columnColor, completedTodos, totalTodos, progress),
+      ),
+      child: _buildTaskCardContent(task, columnColor, completedTodos, totalTodos, progress),
     );
   }
 
-  Widget _buildTaskCard(Task task, Color columnColor) {
-    final progress = _getTaskProgress(task);
-    final completedTodos = task.todos.where((todo) => todo.completed).length;
-    final totalTodos = task.todos.length;
+  Color _getStatusColor(String status) {
+    switch (status) {
+      case 'todo':
+        return Colors.grey;
+      case 'in_progress':
+        return Colors.orange;
+      case 'review':
+        return Colors.blue;
+      case 'done':
+        return Colors.green;
+      default:
+        return Colors.grey;
+    }
+  }
 
+  String _getStatusDisplayName(String status) {
+    switch (status) {
+      case 'todo':
+        return 'TO DO';
+      case 'in_progress':
+        return 'IN PROGRESS';
+      case 'review':
+        return 'REVIEW';
+      case 'done':
+        return 'DONE';
+      default:
+        return 'TO DO';
+    }
+  }
+
+  Widget _buildTaskCardContent(Task task, Color columnColor, int completedTodos, int totalTodos, double progress) {
+    final taskStatus = _getTaskStatus(task);
+    final statusColor = _getStatusColor(taskStatus);
+    
     return Card(
       margin: const EdgeInsets.only(bottom: 8),
       elevation: 2,
@@ -487,6 +851,35 @@ class _ProjectKanbanScreenState extends State<ProjectKanbanScreen> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
+              // Status indicator and drag handle
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                    decoration: BoxDecoration(
+                      color: statusColor.withValues(alpha: 0.2),
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                    child: Text(
+                      _getStatusDisplayName(taskStatus),
+                      style: TextStyle(
+                        fontSize: 10,
+                        fontWeight: FontWeight.bold,
+                        color: statusColor,
+                      ),
+                    ),
+                  ),
+                  Icon(
+                    Icons.drag_indicator,
+                    size: 16,
+                    color: Colors.grey[400],
+                  ),
+                ],
+              ),
+              
+              const SizedBox(height: 8),
+              
               // Task Title
               Text(
                 task.title,
@@ -499,11 +892,11 @@ class _ProjectKanbanScreenState extends State<ProjectKanbanScreen> {
                 overflow: TextOverflow.ellipsis,
               ),
               
-              // Task Description
+              // Task Description (without status tag)
               if (task.description.isNotEmpty) ...[
                 const SizedBox(height: 4),
                 Text(
-                  task.description,
+                  task.description.replaceAll(RegExp(r'\[STATUS:\w+\]'), '').trim(),
                   style: TextStyle(
                     fontSize: 12,
                     color: Colors.grey[600],
@@ -588,8 +981,14 @@ class _ProjectKanbanScreenState extends State<ProjectKanbanScreen> {
 
 class _CreateTaskDialog extends StatefulWidget {
   final String columnName;
+  final String projectId;
+  final String boardId;
 
-  const _CreateTaskDialog({required this.columnName});
+  const _CreateTaskDialog({
+    required this.columnName,
+    required this.projectId,
+    required this.boardId,
+  });
 
   @override
   _CreateTaskDialogState createState() => _CreateTaskDialogState();
@@ -598,37 +997,211 @@ class _CreateTaskDialog extends StatefulWidget {
 class _CreateTaskDialogState extends State<_CreateTaskDialog> {
   final _titleController = TextEditingController();
   final _descriptionController = TextEditingController();
+  final List<Todo> _todos = [];
+
+  @override
+  void dispose() {
+    _titleController.dispose();
+    _descriptionController.dispose();
+    super.dispose();
+  }
+
+  void _addTodo() {
+    showDialog(
+      context: context,
+      builder: (context) {
+        final todoController = TextEditingController();
+        return AlertDialog(
+          title: const Text('Add Todo Item'),
+          content: TextField(
+            controller: todoController,
+            decoration: const InputDecoration(
+              labelText: 'Todo description',
+              hintText: 'Enter todo item...',
+            ),
+            autofocus: true,
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context),
+              child: const Text('Cancel'),
+            ),
+            ElevatedButton(
+              onPressed: () {
+                if (todoController.text.trim().isNotEmpty) {
+                  setState(() {
+                    _todos.add(Todo(
+                      title: todoController.text.trim(),
+                      completed: false,
+                    ));
+                  });
+                  Navigator.pop(context);
+                }
+              },
+              child: const Text('Add'),
+            ),
+          ],
+        );
+      },
+    );
+  }
+
+  void _removeTodo(int index) {
+    setState(() {
+      _todos.removeAt(index);
+    });
+  }
 
   @override
   Widget build(BuildContext context) {
+    final columnColor = _getColumnColor(widget.columnName);
+    
     return AlertDialog(
-      title: Text('Add Task to ${widget.columnName}'),
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-      content: Column(
-        mainAxisSize: MainAxisSize.min,
+      title: Row(
         children: [
-          TextField(
-            controller: _titleController,
-            decoration: const InputDecoration(
-              labelText: 'Task Title *',
-              hintText: 'Enter task title',
-              border: OutlineInputBorder(),
+          Container(
+            width: 4,
+            height: 24,
+            decoration: BoxDecoration(
+              color: columnColor,
+              borderRadius: BorderRadius.circular(2),
             ),
-            textCapitalization: TextCapitalization.sentences,
-            autofocus: true,
           ),
-          const SizedBox(height: 16),
-          TextField(
-            controller: _descriptionController,
-            decoration: const InputDecoration(
-              labelText: 'Description',
-              hintText: 'Enter task description',
-              border: OutlineInputBorder(),
-            ),
-            maxLines: 3,
-            textCapitalization: TextCapitalization.sentences,
+          const SizedBox(width: 12),
+          Expanded(
+            child: Text('Add Task to ${widget.columnName}'),
           ),
         ],
+      ),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+      content: SizedBox(
+        width: MediaQuery.of(context).size.width * 0.9,
+        child: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              // Column Status Info
+              Container(
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: columnColor.withValues(alpha: 0.1),
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(color: columnColor.withValues(alpha: 0.3)),
+                ),
+                child: Row(
+                  children: [
+                    Icon(Icons.info_outline, color: columnColor, size: 16),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: Text(
+                        'This task will be created in "${widget.columnName}" column',
+                        style: TextStyle(
+                          fontSize: 12,
+                          color: columnColor,
+                          fontWeight: FontWeight.w500,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              
+              const SizedBox(height: 16),
+              
+              // Task Title
+              TextField(
+                controller: _titleController,
+                decoration: const InputDecoration(
+                  labelText: 'Task Title *',
+                  hintText: 'Enter task title',
+                  border: OutlineInputBorder(),
+                  prefixIcon: Icon(Icons.title),
+                ),
+                textCapitalization: TextCapitalization.sentences,
+                autofocus: true,
+              ),
+              
+              const SizedBox(height: 16),
+              
+              // Task Description
+              TextField(
+                controller: _descriptionController,
+                decoration: const InputDecoration(
+                  labelText: 'Description',
+                  hintText: 'Enter task description',
+                  border: OutlineInputBorder(),
+                  prefixIcon: Icon(Icons.description),
+                ),
+                maxLines: 3,
+                textCapitalization: TextCapitalization.sentences,
+              ),
+              
+              const SizedBox(height: 16),
+              
+              // Todos Section
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  Text(
+                    'Todo Items (${_todos.length})',
+                    style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w500),
+                  ),
+                  TextButton.icon(
+                    onPressed: _addTodo,
+                    icon: const Icon(Icons.add, size: 16),
+                    label: const Text('Add Todo'),
+                  ),
+                ],
+              ),
+              
+              if (_todos.isNotEmpty) ...[
+                const SizedBox(height: 8),
+                Container(
+                  constraints: const BoxConstraints(maxHeight: 150),
+                  child: ListView.builder(
+                    shrinkWrap: true,
+                    itemCount: _todos.length,
+                    itemBuilder: (context, index) {
+                      final todo = _todos[index];
+                      return Card(
+                        margin: const EdgeInsets.only(bottom: 4),
+                        child: ListTile(
+                          dense: true,
+                          leading: Checkbox(
+                            value: todo.completed,
+                            onChanged: (value) {
+                              setState(() {
+                                _todos[index] = Todo(
+                                  title: todo.title,
+                                  completed: value ?? false,
+                                );
+                              });
+                            },
+                          ),
+                          title: Text(
+                            todo.title,
+                            style: TextStyle(
+                              decoration: todo.completed 
+                                  ? TextDecoration.lineThrough 
+                                  : null,
+                              fontSize: 14,
+                            ),
+                          ),
+                          trailing: IconButton(
+                            icon: const Icon(Icons.delete, size: 16),
+                            onPressed: () => _removeTodo(index),
+                            color: Colors.red,
+                          ),
+                        ),
+                      );
+                    },
+                  ),
+                ),
+              ],
+            ],
+          ),
+        ),
       ),
       actions: [
         TextButton(
@@ -647,11 +1220,29 @@ class _CreateTaskDialogState extends State<_CreateTaskDialog> {
             Navigator.pop(context, {
               'title': _titleController.text.trim(),
               'description': _descriptionController.text.trim(),
+              'todos': _todos,
             });
           },
-          child: const Text('Create'),
+          style: ElevatedButton.styleFrom(
+            backgroundColor: columnColor,
+            foregroundColor: Colors.white,
+          ),
+          child: const Text('Create Task'),
         ),
       ],
     );
+  }
+
+  Color _getColumnColor(String columnName) {
+    final lowerColumnName = columnName.toLowerCase();
+    if (lowerColumnName.contains('progress')) {
+      return Colors.orange;
+    } else if (lowerColumnName.contains('review')) {
+      return Colors.blue;
+    } else if (lowerColumnName.contains('done') || lowerColumnName.contains('completed')) {
+      return Colors.green;
+    } else {
+      return Colors.grey;
+    }
   }
 }

@@ -51,25 +51,47 @@ class AuthService {
     }
   }
 
-  // Register new user
+  // Register new user with better error handling
   Future<bool> register(String email, String password, String name) async {
     try {
       print('📝 Attempting registration for: $email');
       
+      // Validate input
+      if (email.trim().isEmpty || password.isEmpty || name.trim().isEmpty) {
+        throw Exception('All fields are required');
+      }
+      
+      if (password.length < 8) {
+        throw Exception('Password must be at least 8 characters long');
+      }
+      
+      if (!RegExp(r'^[\w-\.]+@([\w-]+\.)+[\w-]{2,4}$').hasMatch(email)) {
+        throw Exception('Please enter a valid email address');
+      }
+      
       final userData = {
-        'email': email,
+        'email': email.trim(),
         'password': password,
         'passwordConfirm': password,
-        'name': name,
+        'name': name.trim(),
+        // Remove emailVisibility as it might not be allowed
       };
 
+      print('📝 Creating user with data: $userData');
+
+      // Add a small delay to avoid rate limiting
+      await Future.delayed(const Duration(milliseconds: 100));
+      
       final record = await pb.collection('users').create(body: userData);
       
       if (record.id.isNotEmpty) {
         print('✅ Registration successful for user: ${record.id}');
+        print('📧 User email: ${record.data['email']}');
+        print('👤 User name: ${record.data['name']}');
         
         // Auto-login after registration
-        final loginSuccess = await login(email, password);
+        print('🔄 Attempting auto-login...');
+        final loginSuccess = await login(email.trim(), password);
         
         if (loginSuccess) {
           print('✅ Auto-login after registration successful');
@@ -85,19 +107,28 @@ class AuthService {
     } catch (e) {
       print('❌ Registration error: $e');
       
-      // Handle specific error messages
-      if (e.toString().contains('400')) {
-        if (e.toString().contains('email')) {
-          throw Exception('Email already exists or invalid format');
-        } else if (e.toString().contains('password')) {
+      String errorMessage = e.toString();
+      
+      // Handle specific PocketBase error messages
+      if (errorMessage.contains('Failed to create record')) {
+        if (errorMessage.contains('email')) {
+          throw Exception('Email already exists or invalid email format');
+        } else if (errorMessage.contains('password')) {
           throw Exception('Password must be at least 8 characters');
         } else {
-          throw Exception('Invalid registration data');
+          throw Exception('Registration failed. Please check your information.');
         }
-      } else if (e.toString().contains('network')) {
-        throw Exception('Network error. Please check your connection.');
+      } else if (errorMessage.contains('validation_invalid_email')) {
+        throw Exception('Invalid email format');
+      } else if (errorMessage.contains('validation_length_out_of_range')) {
+        throw Exception('Password must be at least 8 characters');
+      } else if (errorMessage.contains('network') || errorMessage.contains('connection')) {
+        throw Exception('Network error. Please check your internet connection.');
+      } else if (errorMessage.contains('Exception: ')) {
+        // Re-throw our custom exceptions
+        rethrow;
       } else {
-        throw Exception('Registration failed: ${e.toString()}');
+        throw Exception('Registration failed: Please try again');
       }
     }
   }
@@ -175,13 +206,14 @@ class AuthService {
   Future<void> _saveAuthState() async {
     try {
       final prefs = await SharedPreferences.getInstance();
-      // Use the token and model data directly from authStore
       final token = pb.authStore.token;
       final model = pb.authStore.model;
       
       if (token.isNotEmpty && model != null) {
         await prefs.setString('pb_token', token);
-        await prefs.setString('pb_model', model.toJson().toString());
+        await prefs.setString('pb_user_id', model.id);
+        await prefs.setString('pb_user_email', model.data['email'] ?? '');
+        await prefs.setString('pb_user_name', model.data['name'] ?? '');
         print('💾 Auth state saved');
       }
     } catch (e) {
@@ -193,7 +225,10 @@ class AuthService {
   Future<void> _clearAuthState() async {
     try {
       final prefs = await SharedPreferences.getInstance();
-      await prefs.remove('pb_auth');
+      await prefs.remove('pb_token');
+      await prefs.remove('pb_user_id');
+      await prefs.remove('pb_user_email');
+      await prefs.remove('pb_user_name');
       print('🗑️ Auth state cleared');
     } catch (e) {
       print('❌ Error clearing auth state: $e');
@@ -205,12 +240,13 @@ class AuthService {
     try {
       final prefs = await SharedPreferences.getInstance();
       final token = prefs.getString('pb_token');
-      final modelData = prefs.getString('pb_model');
       
-      if (token != null && token.isNotEmpty && modelData != null) {
-        // Manually restore the auth state
-        pb.authStore.save(token, null); // The model will be validated on next request
+      if (token != null && token.isNotEmpty) {
+        // Restore auth state dengan token
+        pb.authStore.save(token, null);
         print('📱 Auth state loaded from storage');
+        
+        // Validate auth dengan mencoba refresh
         return await validateAuth();
       } else {
         print('📱 No auth state found in storage');

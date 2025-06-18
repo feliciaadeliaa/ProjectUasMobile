@@ -31,6 +31,7 @@ class TaskService {
     }
   }
 
+  // Get ONLY personal tasks (not project tasks)
   Future<List<Task>> getTasks() async {
     try {
       if (!await testConnection()) {
@@ -42,14 +43,16 @@ class TaskService {
       }
 
       final userId = pb.authStore.model?.id;
-      print('🔍 Fetching tasks for user: $userId');
+      print('🔍 Fetching personal tasks for user: $userId');
 
+      // Only get tasks from 'tasks' collection (personal tasks)
+      // Exclude project tasks by filtering out tasks with projectId
       final records = await pb.collection('tasks').getFullList(
         filter: 'userId = "$userId"',
         sort: '-created',
       );
 
-      print('📦 Fetched ${records.length} records from database');
+      print('📦 Fetched ${records.length} personal task records from database');
       
       final tasks = records.map((record) {
         return Task.fromJson({
@@ -64,10 +67,10 @@ class TaskService {
         });
       }).toList();
 
-      print('✅ Successfully parsed ${tasks.length} tasks');
+      print('✅ Successfully parsed ${tasks.length} personal tasks');
       return tasks;
     } catch (e) {
-      print('❌ Error fetching tasks: $e');
+      print('❌ Error fetching personal tasks: $e');
       rethrow;
     }
   }
@@ -83,7 +86,7 @@ class TaskService {
       }
 
       final userId = pb.authStore.model?.id;
-      print('👤 Creating task for user: $userId');
+      print('👤 Creating personal task for user: $userId');
       
       final taskData = <String, dynamic>{
         'title': task.title,
@@ -94,13 +97,16 @@ class TaskService {
           'title': todo.title,
           'completed': todo.completed,
         }).toList(),
+        // Explicitly mark as personal task (no projectId)
+        'isPersonalTask': true,
       };
 
-      print('📝 Task data to send: $taskData');
+      print('📝 Personal task data to send: $taskData');
 
+      // Use 'tasks' collection for personal tasks only
       final record = await pb.collection('tasks').create(body: taskData);
       
-      print('✅ Task created successfully!');
+      print('✅ Personal task created successfully!');
 
       final createdTask = Task.fromJson({
         'id': record.id,
@@ -115,7 +121,7 @@ class TaskService {
 
       return createdTask;
     } catch (e) {
-      print('❌ Error creating task: $e');
+      print('❌ Error creating personal task: $e');
       if (e.toString().contains('404')) {
         throw Exception('Collection "tasks" not found. Please create it in PocketBase Admin Dashboard.');
       } else if (e.toString().contains('403')) {
@@ -129,7 +135,7 @@ class TaskService {
 
   Future<Task> updateTask(String taskId, Task task) async {
     try {
-      print('🔄 Updating task $taskId');
+      print('🔄 Updating personal task $taskId');
       
       final taskData = <String, dynamic>{
         'title': task.title,
@@ -145,7 +151,7 @@ class TaskService {
 
       final record = await pb.collection('tasks').update(taskId, body: taskData);
       
-      print('✅ Task updated successfully');
+      print('✅ Personal task updated successfully');
       
       return Task.fromJson({
         'id': record.id,
@@ -158,7 +164,7 @@ class TaskService {
         'updated': record.updated,
       });
     } catch (e) {
-      print('❌ Error updating task: $e');
+      print('❌ Error updating personal task: $e');
       if (e.toString().contains('404')) {
         throw Exception('Task not found');
       } else if (e.toString().contains('403')) {
@@ -170,7 +176,7 @@ class TaskService {
 
   Future<void> deleteTask(String taskId) async {
     try {
-      print('🗑️ Deleting task: $taskId');
+      print('🗑️ Deleting personal task: $taskId');
       
       // First check if task exists and belongs to user
       final userId = pb.authStore.model?.id;
@@ -181,9 +187,9 @@ class TaskService {
       }
       
       await pb.collection('tasks').delete(taskId);
-      print('✅ Task deleted successfully');
+      print('✅ Personal task deleted successfully');
     } catch (e) {
-      print('❌ Error deleting task: $e');
+      print('❌ Error deleting personal task: $e');
       if (e.toString().contains('404')) {
         throw Exception('Task not found');
       } else if (e.toString().contains('403')) {
@@ -195,13 +201,13 @@ class TaskService {
 
   Future<Task> toggleTaskCompletion(String taskId, bool completed) async {
     try {
-      print('🔄 Toggling task $taskId completion to: $completed');
+      print('🔄 Toggling personal task $taskId completion to: $completed');
       
       final record = await pb.collection('tasks').update(taskId, body: {
         'completed': completed,
       });
       
-      print('✅ Task completion toggled successfully');
+      print('✅ Personal task completion toggled successfully');
       
       return Task.fromJson({
         'id': record.id,
@@ -214,14 +220,14 @@ class TaskService {
         'updated': record.updated,
       });
     } catch (e) {
-      print('❌ Error toggling task completion: $e');
+      print('❌ Error toggling personal task completion: $e');
       rethrow;
     }
   }
 
   Future<Task> updateTodoCompletion(String taskId, int todoIndex, bool completed) async {
     try {
-      print('🔄 Updating todo $todoIndex in task $taskId to: $completed');
+      print('🔄 Updating todo $todoIndex in personal task $taskId to: $completed');
       
       // First get the current task
       final record = await pb.collection('tasks').getOne(taskId);

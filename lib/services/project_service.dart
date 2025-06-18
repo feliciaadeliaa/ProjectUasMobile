@@ -345,7 +345,7 @@ class ProjectService {
       if (boardId != null) filter += ' && boardId = "$boardId"';
       if (columnId != null) filter += ' && columnId = "$columnId"';
 
-      final records = await pb.collection('tasks').getFullList(
+      final records = await pb.collection('project_tasks').getFullList(
         filter: filter,
         sort: 'position',
       );
@@ -378,9 +378,11 @@ class ProjectService {
         'columnId': columnId,
         'userId': userId,
         'position': 0, // Add to top of column
+        'isProjectTask': true, // Mark as project task
       });
 
-      final record = await pb.collection('tasks').create(body: taskData);
+      // Use separate collection for project tasks
+      final record = await pb.collection('project_tasks').create(body: taskData);
 
       // Log activity
       await _logActivity(
@@ -388,7 +390,7 @@ class ProjectService {
         entityType: EntityType.task,
         entityId: record.id,
         entityName: task.title,
-        description: 'Created task "${task.title}"',
+        description: 'Created task "${task.title}" in project',
         projectId: projectId,
         boardId: boardId,
       );
@@ -401,6 +403,24 @@ class ProjectService {
       });
     } catch (e) {
       print('❌ Error creating project task: $e');
+      rethrow;
+    }
+  }
+
+  Future<void> updateProjectTask(Task task) async {
+    try {
+      await pb.collection('project_tasks').update(task.id, body: task.toJson());
+    } catch (e) {
+      print('❌ Error updating project task: $e');
+      rethrow;
+    }
+  }
+
+  Future<void> deleteProjectTask(String taskId) async {
+    try {
+      await pb.collection('project_tasks').delete(taskId);
+    } catch (e) {
+      print('❌ Error deleting project task: $e');
       rethrow;
     }
   }
@@ -500,6 +520,142 @@ class ProjectService {
     } catch (e) {
       print('❌ Error getting project statistics: $e');
       rethrow;
+    }
+  }
+
+  // =====================================================
+  // PROJECT UPDATE & DELETE OPERATIONS
+  // =====================================================
+
+  Future<Project> updateProject(Project project) async {
+    try {
+      final record = await pb.collection('projects').update(
+        project.id,
+        body: project.toJson(),
+      );
+
+      // Log activity
+      await _logActivity(
+        action: ActivityAction.updated,
+        entityType: EntityType.project,
+        entityId: project.id,
+        entityName: project.name,
+        description: 'Updated project "${project.name}"',
+        projectId: project.id,
+      );
+
+      return Project.fromJson({
+        'id': record.id,
+        ...record.data,
+        'created': record.created,
+        'updated': record.updated,
+      });
+    } catch (e) {
+      print('❌ Error updating project: $e');
+      rethrow;
+    }
+  }
+
+  Future<void> deleteProject(String projectId) async {
+    try {
+      // Get project details for logging
+      final project = await getProject(projectId);
+      
+      // Archive project instead of hard delete to preserve data integrity
+      await pb.collection('projects').update(projectId, body: {
+        'isArchived': true,
+        'archivedAt': DateTime.now().toIso8601String(),
+      });
+
+      // Log activity
+      await _logActivity(
+        action: ActivityAction.deleted,
+        entityType: EntityType.project,
+        entityId: projectId,
+        entityName: project.name,
+        description: 'Archived project "${project.name}"',
+        projectId: projectId,
+      );
+    } catch (e) {
+      print('❌ Error deleting project: $e');
+      rethrow;
+    }
+  }
+
+  Future<void> permanentDeleteProject(String projectId) async {
+    try {
+      // Get project details for logging
+      final project = await getProject(projectId);
+      
+      // Delete all related data first
+      await _deleteProjectRelatedData(projectId);
+      
+      // Delete the project
+      await pb.collection('projects').delete(projectId);
+
+      // Log activity (this will fail since project is deleted, but we try anyway)
+      try {
+        await _logActivity(
+          action: ActivityAction.deleted,
+          entityType: EntityType.project,
+          entityId: projectId,
+          entityName: project.name,
+          description: 'Permanently deleted project "${project.name}"',
+          projectId: projectId,
+        );
+      } catch (e) {
+        print('⚠️ Could not log deletion activity: $e');
+      }
+    } catch (e) {
+      print('❌ Error permanently deleting project: $e');
+      rethrow;
+    }
+  }
+
+  Future<void> _deleteProjectRelatedData(String projectId) async {
+    try {
+      // Delete project tasks
+      final projectTasks = await pb.collection('project_tasks').getFullList(
+        filter: 'projectId = "$projectId"',
+      );
+      for (final task in projectTasks) {
+        await pb.collection('project_tasks').delete(task.id);
+      }
+
+      // Delete columns
+      final columns = await pb.collection('columns').getFullList(
+        filter: 'projectId = "$projectId"',
+      );
+      for (final column in columns) {
+        await pb.collection('columns').delete(column.id);
+      }
+
+      // Delete boards
+      final boards = await pb.collection('boards').getFullList(
+        filter: 'projectId = "$projectId"',
+      );
+      for (final board in boards) {
+        await pb.collection('boards').delete(board.id);
+      }
+
+      // Delete project members
+      final members = await pb.collection('project_members').getFullList(
+        filter: 'projectId = "$projectId"',
+      );
+      for (final member in members) {
+        await pb.collection('project_members').delete(member.id);
+      }
+
+      // Delete activity logs
+      final activities = await pb.collection('activity_logs').getFullList(
+        filter: 'projectId = "$projectId"',
+      );
+      for (final activity in activities) {
+        await pb.collection('activity_logs').delete(activity.id);
+      }
+    } catch (e) {
+      print('❌ Error deleting project related data: $e');
+      // Don't rethrow - continue with project deletion
     }
   }
 }
